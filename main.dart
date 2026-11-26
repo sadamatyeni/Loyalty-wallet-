@@ -1,67 +1,80 @@
 import 'dart:convert';
-import 'package:mobile_scanner/mobile_scanner.dart' hide Barcode;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:barcode_widget/barcode_widget.dart';
-import 'package:barcode/barcode.dart' as barcode_lib;
-import 'package:local_auth/local_auth.dart';
-import 'package:crypto/crypto.dart';
-import 'package:uuid/uuid.dart';
 
-void main() => runApp(const LoyaltyWalletApp());
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:crypto/crypto.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:barcode_widget/barcode_widget.dart' as bw;
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const LoyaltyWalletApp());
+}
 
 const storage = FlutterSecureStorage();
-const uuid = Uuid();
 
 class LoyaltyCard {
+  String id;
+  String name;
+  String code;
+  String format;
+  String balance;
+  bool favourite;
+
   LoyaltyCard({
     required this.id,
     required this.name,
-    required this.value,
+    required this.code,
     required this.format,
-    this.category = 'Other',
-    this.balance,
-    this.favorite = false,
+    this.balance = '0',
+    this.favourite = false,
   });
 
-  final String id, name, value, format, category;
-  final String? balance;
-  final bool favorite;
-
   Map<String, dynamic> toJson() => {
-    'id': id, 'name': name, 'value': value, 'format': format,
-    'category': category, 'balance': balance, 'favorite': favorite,
-  };
+        'id': id,
+        'name': name,
+        'code': code,
+        'format': format,
+        'balance': balance,
+        'favourite': favourite,
+      };
 
-  factory LoyaltyCard.fromJson(Map<String, dynamic> json) => LoyaltyCard(
-    id: json['id'] ?? uuid.v4(),
-    name: json['name'] ?? 'Card',
-    value: json['value'] ?? '',
-    format: json['format'] ?? 'unknown',
-    category: json['category'] ?? 'Other',
-    balance: json['balance'],
-    favorite: json['favorite'] ?? false,
-  );
-
-  LoyaltyCard copyWith({String? balance, bool? favorite}) => LoyaltyCard(
-    id: id, name: name, value: value, format: format, category: category,
-    balance: balance ?? this.balance, favorite: favorite ?? this.favorite,
-  );
+  factory LoyaltyCard.fromJson(Map<String, dynamic> json) {
+    return LoyaltyCard(
+      id: json['id'] ?? '',
+      name: json['name'] ?? 'Loyalty Card',
+      code: json['code'] ?? '',
+      format: json['format'] ?? 'qr',
+      balance: json['balance'] ?? '0',
+      favourite: json['favourite'] ?? false,
+    );
+  }
 }
 
 class LoyaltyWalletApp extends StatelessWidget {
   const LoyaltyWalletApp({super.key});
+
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Loyalty Wallet SA',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff168a70), brightness: Brightness.dark), useMaterial3: true),
-    home: const WalletHome(),
-  );
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Loyalty Wallet SA',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF146B4A),
+        ),
+        useMaterial3: true,
+      ),
+      home: const WalletHome(),
+    );
+  }
 }
 
 class WalletHome extends StatefulWidget {
   const WalletHome({super.key});
+
   @override
   State<WalletHome> createState() => _WalletHomeState();
 }
@@ -69,166 +82,701 @@ class WalletHome extends StatefulWidget {
 class _WalletHomeState extends State<WalletHome> {
   List<LoyaltyCard> cards = [];
   bool loading = true;
+  bool unlocked = false;
+  bool setupPin = false;
   String search = '';
+  String pinHash = '';
 
   @override
-  void initState() { super.initState(); loadCards(); }
+  void initState() {
+    super.initState();
+    loadWallet();
+  }
 
-  Future<void> loadCards() async {
-    final raw = await storage.read(key: 'wallet_cards');
-    if (raw != null) {
-      try { cards = (jsonDecode(raw) as List).map((e) => LoyaltyCard.fromJson(e)).toList(); } catch (_) {}
+  Future<void> loadWallet() async {
+    final savedCards = await storage.read(key: 'wallet_cards');
+    final savedPin = await storage.read(key: 'wallet_pin');
+
+    if (savedCards != null) {
+      try {
+        final decoded = jsonDecode(savedCards) as List;
+        cards = decoded
+            .map((e) => LoyaltyCard.fromJson(e))
+            .toList();
+      } catch (_) {
+        cards = [];
+      }
     }
-    if (mounted) setState(() => loading = false);
+
+    pinHash = savedPin ?? '';
+    setupPin = pinHash.isEmpty;
+    unlocked = false;
+
+    if (mounted) {
+      setState(() {
+        loading = false;
+      });
+    }
   }
 
-  Future<void> saveCards() async {
-    await storage.write(key: 'wallet_cards', value: jsonEncode(cards.map((c) => c.toJson()).toList()));
+  Future<void> saveWallet() async {
+    await storage.write(
+      key: 'wallet_cards',
+      value: jsonEncode(cards.map((e) => e.toJson()).toList()),
+    );
   }
 
-  Future<void> addScanned(String value, String format) async {
-    if (!mounted) return;
-    final result = await Navigator.push<LoyaltyCard>(context, MaterialPageRoute(builder: (_) => AddCardScreen(initialValue: value, initialFormat: format)));
-    if (result != null) { cards.insert(0, result); await saveCards(); setState(() {}); }
+  String hashPin(String pin) {
+    return sha256.convert(utf8.encode(pin)).toString();
   }
 
-  Future<void> scan() async {
-    final result = await Navigator.push<Map<String, String>>(context, MaterialPageRoute(builder: (_) => const ScanScreen()));
-    if (result != null && result['value'] != null) await addScanned(result['value']!, result['format'] ?? 'unknown');
+  Future<void> savePin(String pin) async {
+    pinHash = hashPin(pin);
+    await storage.write(key: 'wallet_pin', value: pinHash);
+
+    if (mounted) {
+      setState(() {
+        setupPin = false;
+        unlocked = true;
+      });
+    }
   }
 
-  List<LoyaltyCard> get filtered => cards.where((c) => c.name.toLowerCase().contains(search.toLowerCase()) || c.category.toLowerCase().contains(search.toLowerCase())).toList();
+  Future<void> checkPin(String pin) async {
+    if (hashPin(pin) == pinHash) {
+      setState(() => unlocked = true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Incorrect PIN')),
+      );
+    }
+  }
+
+  Future<void> biometricUnlock() async {
+    try {
+      final auth = LocalAuthentication();
+      final available = await auth.canCheckBiometrics ||
+          await auth.isDeviceSupported();
+
+      if (!available) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Biometrics are not available on this device'),
+          ),
+        );
+        return;
+      }
+
+      final success = await auth.authenticate(
+        localizedReason: 'Unlock Loyalty Wallet',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
+      );
+
+      if (success && mounted) {
+        setState(() => unlocked = true);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Authentication failed: $e')),
+      );
+    }
+  }
+
+  Future<void> addCard({
+    required String name,
+    required String code,
+    required String format,
+  }) async {
+    if (name.trim().isEmpty || code.trim().isEmpty) return;
+
+    cards.add(
+      LoyaltyCard(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        name: name.trim(),
+        code: code.trim(),
+        format: format,
+      ),
+    );
+
+    await saveWallet();
+    setState(() {});
+  }
+
+  Future<void> deleteCard(LoyaltyCard card) async {
+    cards.removeWhere((c) => c.id == card.id);
+    await saveWallet();
+    setState(() {});
+  }
+
+  Future<void> toggleFavourite(LoyaltyCard card) async {
+    card.favourite = !card.favourite;
+    await saveWallet();
+    setState(() {});
+  }
+
+  Future<void> editBalance(LoyaltyCard card) async {
+    final controller = TextEditingController(text: card.balance);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${card.name} balance'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+          ),
+          decoration: const InputDecoration(
+            labelText: 'Reward balance',
+            hintText: 'Enter your balance',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      card.balance = result;
+      await saveWallet();
+      setState(() {});
+    }
+  }
+
+  Future<void> showAddCardDialog() async {
+    final nameController = TextEditingController();
+    final codeController = TextEditingController();
+    String format = 'qr';
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Add loyalty card'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Card name',
+                      hintText: 'e.g. Checkers Xtra Savings',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: codeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Barcode number or QR text',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: format,
+                    decoration: const InputDecoration(
+                      labelText: 'Barcode type',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'qr', child: Text('QR Code')),
+                      DropdownMenuItem(value: 'ean13', child: Text('EAN-13')),
+                      DropdownMenuItem(value: 'ean8', child: Text('EAN-8')),
+                      DropdownMenuItem(value: 'upca', child: Text('UPC-A')),
+                      DropdownMenuItem(value: 'upce', child: Text('UPC-E')),
+                      DropdownMenuItem(
+                        value: 'code128',
+                        child: Text('Code 128'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'code39',
+                        child: Text('Code 39'),
+                      ),
+                      DropdownMenuItem(value: 'itf', child: Text('ITF')),
+                      DropdownMenuItem(
+                        value: 'codabar',
+                        child: Text('Codabar'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => format = value);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Save card'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (result == true) {
+      await addCard(
+        name: nameController.text,
+        code: codeController.text,
+        format: format,
+      );
+    }
+  }
+
+  Future<void> scanCard() async {
+    final result = await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ScanPage(),
+      ),
+    );
+
+    if (result != null) {
+      final code = result['code'] ?? '';
+      final format = result['format'] ?? 'qr';
+
+      final nameController = TextEditingController();
+
+      final name = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Name your card'),
+          content: TextField(
+            controller: nameController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Pick n Pay Smart Shopper',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                context,
+                nameController.text,
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+
+      if (name != null && name.trim().isNotEmpty) {
+        await addCard(
+          name: name,
+          code: code,
+          format: format,
+        );
+      }
+    }
+  }
+
+  bw.Barcode barcodeFor(String format) {
+    final f = format.toLowerCase();
+
+    if (f.contains('qr')) return bw.Barcode.qrCode();
+    if (f.contains('ean13')) return bw.Barcode.ean13();
+    if (f.contains('ean8')) return bw.Barcode.ean8();
+    if (f.contains('upca')) return bw.Barcode.upcA();
+    if (f.contains('upce')) return bw.Barcode.upcE();
+    if (f.contains('code128')) return bw.Barcode.code128();
+    if (f.contains('code39')) return bw.Barcode.code39();
+    if (f.contains('itf')) return bw.Barcode.itf();
+    if (f.contains('codabar')) return bw.Barcode.codabar();
+
+    return bw.Barcode.qrCode();
+  }
+
+  List<LoyaltyCard> get filteredCards {
+    final q = search.toLowerCase();
+
+    return cards.where((card) {
+      return card.name.toLowerCase().contains(q) ||
+          card.code.toLowerCase().contains(q);
+    }).toList()
+      ..sort((a, b) {
+        if (a.favourite == b.favourite) {
+          return a.name.compareTo(b.name);
+        }
+        return a.favourite ? -1 : 1;
+      });
+  }
+
+  Widget pinScreen() {
+    final controller = TextEditingController();
+
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.wallet,
+                size: 80,
+                color: Color(0xFF146B4A),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Loyalty Wallet SA',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                setupPin ? 'Create a PIN to protect your cards' : 'Wallet locked',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                textAlign: TextAlign.center,
+                decoration: const InputDecoration(
+                  labelText: '4–6 digit PIN',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    final pin = controller.text;
+
+                    if (pin.length < 4) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('PIN must be at least 4 digits'),
+                        ),
+                      );
+                      return;
+                    }
+
+                    if (setupPin) {
+                      savePin(pin);
+                    } else {
+                      checkPin(pin);
+                    }
+                  },
+                  child: Text(setupPin ? 'Create PIN' : 'Unlock'),
+                ),
+              ),
+              if (!setupPin) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: biometricUnlock,
+                  icon: const Icon(Icons.fingerprint),
+                  label: const Text('Use device authentication'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!unlocked) {
+      return pinScreen();
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Loyalty Wallet SA'), actions: [
-        IconButton(tooltip: 'Scan card', icon: const Icon(Icons.qr_code_scanner), onPressed: scan),
-      ]),
-      floatingActionButton: FloatingActionButton.extended(onPressed: () => addScanned('', 'manual'), icon: const Icon(Icons.add), label: const Text('Add card')),
-      body: loading ? const Center(child: CircularProgressIndicator()) : Column(children: [
-        Padding(padding: const EdgeInsets.all(12), child: TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search your cards', border: OutlineInputBorder()), onChanged: (v) => setState(() => search = v)),
-        Expanded(child: filtered.isEmpty ? const Center(child: Text('No cards yet. Scan or add your first card.')) : ListView.builder(
-          itemCount: filtered.length,
-          itemBuilder: (context, index) {
-            final card = filtered[index];
-            return Card(margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5), child: ListTile(
-              leading: Icon(card.favorite ? Icons.star : Icons.card_membership, color: card.favorite ? Colors.amber : null),
-              title: Text(card.name), subtitle: Text(card.category + (card.balance == null || card.balance!.isEmpty ? '' : ' • ${card.balance}')),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CardDetailScreen(card: card, onUpdate: (updated) async { final i = cards.indexWhere((x) => x.id == updated.id); if (i >= 0) cards[i] = updated; await saveCards(); setState(() {}); }, onDelete: () async { cards.removeWhere((x) => x.id == card.id); await saveCards(); setState(() {}); })),
-            ));
-          })),
-      ]),
+      appBar: AppBar(
+        title: const Text('Loyalty Wallet SA'),
+        actions: [
+          IconButton(
+            tooltip: 'Lock wallet',
+            icon: const Icon(Icons.lock),
+            onPressed: () => setState(() => unlocked = false),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              onChanged: (value) => setState(() => search = value),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search loyalty cards',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: filteredCards.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.credit_card,
+                          size: 70,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('No loyalty cards yet'),
+                        const SizedBox(height: 8),
+                        const Text('Scan a card or add one manually'),
+                        const SizedBox(height: 20),
+                        FilledButton.icon(
+                          onPressed: scanCard,
+                          icon: const Icon(Icons.qr_code_scanner),
+                          label: const Text('Scan card'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 100),
+                    itemCount: filteredCards.length,
+                    itemBuilder: (context, index) {
+                      final card = filteredCards[index];
+
+                      return Card(
+                        child: ListTile(
+                          leading: Icon(
+                            card.favourite
+                                ? Icons.star
+                                : Icons.card_membership,
+                            color: card.favourite
+                                ? Colors.amber
+                                : Theme.of(context).colorScheme.primary,
+                          ),
+                          title: Text(card.name),
+                          subtitle: Text('Balance: ${card.balance}'),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'fav') {
+                                toggleFavourite(card);
+                              } else if (value == 'balance') {
+                                editBalance(card);
+                              } else if (value == 'delete') {
+                                deleteCard(card);
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem(
+                                value: 'fav',
+                                child: Text(
+                                  card.favourite
+                                      ? 'Remove favourite'
+                                      : 'Add favourite',
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'balance',
+                                child: Text('Edit balance'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete card'),
+                              ),
+                            ],
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CardDisplayPage(
+                                  card: card,
+                                  barcode: barcodeFor(card.format),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'manual',
+            onPressed: showAddCardDialog,
+            child: const Icon(Icons.add),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            heroTag: 'scan',
+            onPressed: scanCard,
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan card'),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class ScanScreen extends StatelessWidget {
-  const ScanScreen({super.key});
+class ScanPage extends StatefulWidget {
+  const ScanPage({super.key});
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Scan loyalty code')),
-    body: MobileScanner(onDetect: (capture) {
-      final item = capture.barcodes.firstOrNull;
-      final value = item?.rawValue;
-      if (value != null && value.isNotEmpty) Navigator.pop(context, {'value': value, 'format': item!.format.name});
-    }),
-  );
+  State<ScanPage> createState() => _ScanPageState();
 }
 
-class AddCardScreen extends StatefulWidget {
-  const AddCardScreen({super.key, this.initialValue = '', this.initialFormat = 'unknown'});
-  final String initialValue, initialFormat;
+class _ScanPageState extends State<ScanPage> {
+  bool scanned = false;
+
   @override
-  State<AddCardScreen> createState() => _AddCardScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan loyalty card')),
+      body: MobileScanner(
+        onDetect: (capture) {
+          if (scanned) return;
+
+          final barcode = capture.barcodes.firstOrNull;
+          final value = barcode?.rawValue;
+
+          if (value == null || value.isEmpty) return;
+
+          scanned = true;
+
+          Navigator.pop(
+            context,
+            {
+              'code': value,
+              'format': barcode!.format.name,
+            },
+          );
+        },
+      ),
+    );
+  }
 }
 
-class _AddCardScreenState extends State<AddCardScreen> {
-  late final name = TextEditingController();
-  late final value = TextEditingController(text: widget.initialValue);
-  late final balance = TextEditingController();
-  String category = 'Other';
-  @override
-  void dispose() { name.dispose(); value.dispose(); balance.dispose(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Add loyalty card')),
-    body: ListView(padding: const EdgeInsets.all(16), children: [
-      TextField(controller: name, decoration: const InputDecoration(labelText: 'Store / card name')),
-      const SizedBox(height: 12),
-      DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Category'), items: ['Groceries','Fuel','Pharmacy','Retail','Other'].map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(), onChanged: (v) => setState(() => category = v ?? 'Other'),
-      const SizedBox(height: 12),
-      TextField(controller: value, decoration: const InputDecoration(labelText: 'Barcode / QR contents', helperText: 'You can scan it or enter the code manually')),
-      const SizedBox(height: 12),
-      TextField(controller: balance, decoration: const InputDecoration(labelText: 'Rewards balance (optional)')),
-      const SizedBox(height: 24),
-      FilledButton(onPressed: () {
-        if (name.text.trim().isEmpty || value.text.trim().isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a card name and code.'))); return; }
-        Navigator.pop(context, LoyaltyCard(id: uuid.v4(), name: name.text.trim(), value: value.text.trim(), format: widget.initialFormat, category: category, balance: balance.text.trim().isEmpty ? null : balance.text.trim()));
-      }, child: const Text('Save card')),
-    ]),
-  );
-}
-
-class CardDetailScreen extends StatefulWidget {
-  const CardDetailScreen({super.key, required this.card, required this.onUpdate, required this.onDelete});
+class CardDisplayPage extends StatelessWidget {
   final LoyaltyCard card;
-  final Future<void> Function(LoyaltyCard) onUpdate;
-  final Future<void> Function() onDelete;
-  @override
-  State<CardDetailScreen> createState() => _CardDetailScreenState();
-}
+  final bw.Barcode barcode;
 
-class _CardDetailScreenState extends State<CardDetailScreen> {
-  late LoyaltyCard card = widget.card;
-  barcode_lib.Barcode get barcode {
-    final f = card.format.toLowerCase();
-    if (f.contains('qr')) return barcode_lib.Barcode.qrCode();
-    if (f.contains('ean13')) return barcode_lib.Barcode.ean13();
-    if (f.contains('ean8')) return barcode_lib.Barcode.ean8();
-    if (f.contains('upca')) return barcode_lib.Barcode.upcA();
-    if (f.contains('upce')) return barcode_lib.Barcode.upcE();
-    if (f.contains('code128')) return barcode_lib.Barcode.code128();
-    if (f.contains('code39')) return barcode_lib.Barcode.code39();
-    if (f.contains('codabar')) return barcode_lib.Barcode.codabar();
-    return barcode_lib.Barcode.qrCode();
-  }
-  Future<void> editBalance() async {
-    final controller = TextEditingController(text: card.balance ?? '');
-    final result = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(title: const Text('Update rewards balance'), content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'Balance')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('Save'))]);
-    controller.dispose();
-    if (result != null) { card = card.copyWith(balance: result); await widget.onUpdate(card); setState(() {}); }
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(card.name), actions: [IconButton(icon: Icon(card.favorite ? Icons.star : Icons.star_border), onPressed: () async { card = card.copyWith(favorite: !card.favorite); await widget.onUpdate(card); setState(() {}); })]),
-    body: ListView(padding: const EdgeInsets.all(18), children: [
-      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
-        Text(card.name, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 24),
-        BarcodeWidget(barcode: barcode, data: card.value, width: 320, height: 150, drawText: true, errorBuilder: (context, error) => Text('This code format cannot be displayed.\\nCode: ${card.value}')),
-        const SizedBox(height: 16),
-        SelectableText(card.value, textAlign: TextAlign.center),
-      ]))),
-      ListTile(title: const Text('Rewards balance'), subtitle: Text(card.balance ?? 'Not set'), trailing: IconButton(icon: const Icon(Icons.edit), onPressed: editBalance)),
-      ListTile(title: const Text('Card format'), subtitle: Text(card.format)),
-      ListTile(title: const Text('Category'), subtitle: Text(card.category)),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(onPressed: () async { await widget.onDelete(); if (mounted) Navigator.pop(context); }, icon: const Icon(Icons.delete_outline), label: const Text('Delete card')),
-    ]),
-  );
-}
+  const CardDisplayPage({
+    super.key,
+    required this.card,
+    required this.barcode,
+  });
 
-class SecurityScreen extends StatefulWidget {
-  const SecurityScreen({super.key});
   @override
-  State<SecurityScreen> createState() => _SecurityScreenState();
-}
-class _SecurityScreenState extends State<SecurityScreen> {
-  final auth = LocalAuthentication();
-  @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Security')), body: Padding(padding: const EdgeInsets.all(16), child: FilledButton.icon(onPressed: () async {
-    try { final ok = await auth.authenticate(localizedReason: 'Authenticate to protect your wallet', options: const AuthenticationOptions(biometricOnly: false)); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Authentication successful' : 'Authentication cancelled'))); } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Authentication unavailable: $e'))); }
-  }, icon: const Icon(Icons.fingerprint), label: const Text('Test device authentication'))));
+  Widget build(BuildContext context) {
+    final isQr = card.format.toLowerCase().contains('qr');
+
+    return Scaffold(
+      appBar: AppBar(title: Text(card.name)),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  card.name,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: bw.BarcodeWidget(
+                    barcode: barcode,
+                    data: card.code,
+                    width: isQr ? 260 : 320,
+                    height: isQr ? 260 : 160,
+                    drawText: !isQr,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SelectableText(
+                  card.code,
+                  style: const TextStyle(fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Balance: ${card.balance}',
+                  style: const TextStyle(fontSize: 18),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Increase screen brightness for easier scanning.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: card.code),
+                    );
+
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Code copied')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.copy),
+                  label: const Text('Copy code'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
