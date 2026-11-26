@@ -1404,5 +1404,271 @@ class _WalletHomeState extends State<WalletHome> {
         ],
       ),
     );
+    class ScanPage extends StatelessWidget {
+  const ScanPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan loyalty card'),
+      ),
+      body: MobileScanner(
+        onDetect: (capture) {
+          if (capture.barcodes.isNotEmpty) {
+            Navigator.pop(context, capture);
+          }
+        },
+      ),
+    );
+  }
+}
+
+class CardDetail extends StatelessWidget {
+  const CardDetail({
+    super.key,
+    required this.card,
+    required this.onBalance,
+    required this.onDelete,
+  });
+
+  final LoyaltyCard card;
+  final VoidCallback onBalance;
+  final VoidCallback onDelete;
+
+  bw.Barcode _barcode() {
+    final format = card.format.toLowerCase();
+
+    if (format.contains('qr')) {
+      return bw.Barcode.qrCode();
+    }
+
+    if (format.contains('ean13') || format.contains('ean_13')) {
+      return bw.Barcode.ean13();
+    }
+
+    if (format.contains('ean8') || format.contains('ean_8')) {
+      return bw.Barcode.ean8();
+    }
+
+    if (format.contains('upca') || format.contains('upc_a')) {
+      return bw.Barcode.upcA();
+    }
+
+    if (format.contains('upce') || format.contains('upc_e')) {
+      return bw.Barcode.upcE();
+    }
+
+    if (format.contains('code128')) {
+      return bw.Barcode.code128();
+    }
+
+    if (format.contains('code39')) {
+      return bw.Barcode.code39();
+    }
+
+    if (format.contains('itf')) {
+      return bw.Barcode.itf();
+    }
+
+    if (format.contains('codabar')) {
+      return bw.Barcode.codabar();
+    }
+
+    // Unknown formats display as QR.
+    return bw.Barcode.qrCode();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(card.name),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: onDelete,
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const SizedBox(height: 20),
+          Center(
+            child: bw.BarcodeWidget(
+              barcode: _barcode(),
+              data: card.value,
+              width: 300,
+              height: 220,
+              drawText: true,
+              errorBuilder: (_, __) => const Text(
+                'This barcode format cannot be displayed.',
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SelectableText(
+            card.value,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 25),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.wallet),
+              title: const Text('Rewards balance'),
+              subtitle: Text(
+                card.balance.isEmpty
+                    ? 'Not set'
+                    : card.balance,
+              ),
+              trailing: const Icon(Icons.edit),
+              onTap: onBalance,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Barcode compatibility can vary between stores. '
+            'Test your saved card before relying on it at checkout.',
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+  }
+}
+class ScanPage extends StatelessWidget {
+  const ScanPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan loyalty card'),
+      ),
+      body: MobileScanner(
+        onDetect: (capture) {
+          if (capture.barcodes.isNotEmpty) {
+            Navigator.pop(context, capture);
+          }
+        },
+      ),
+    );
+  }
+}
+
+class CardDetail extends StatelessWidget {
+  const CardDetail({
+    super.key,
+    required this.card,
+    required this.onBalance,
+    required this.onDelete,
+  });
+
+  final LoyaltyCard card;
+  final VoidCallback onBalance;
+  final VoidCallback onDelete;
+
+  bw.Barcode _barcode() {
+    final format = card.format.toLowerCase();
+
+    if (format.contains('qr')) {
+      return bw.Barcode.qrCode();
+    }
+
+    if (format.contains('ean13') || format.contains('ean_13')) {
+      return bw.Barcode.ean13();
+    }
+
+    if (format.contains('ean8') || format.contains('ean_8')) {
+      return bw.Barcode.ean8();
+    }
+
+    if (format.contains('upca') || format.contains('upc_a')) {
+      return bw.Barcode.upcA();
+    }
+
+    if (format.contains('upce') || format.contains('upc_e')) {
+      return bw.Barcode.upcE();
+    }
+
+    if (format.contains('code128')) {
+      return bw.Barcode.code128();
+    }
+
+    if (format.contains('code39')) {
+      return bw.Barcode.code39();
+    }
+
+    if (format.contains('itf')) {
+      return bw.Barcode.itf();
+    }
+
+    if (format.contains('codabar')) {
+      return bw.Barcode.codabar();
+    }
+
+    // Unknown formats display as QR.
+    return bw.Barcode.qrCode();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(card.name),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: onDelete,
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const SizedBox(height: 20),
+          Center(
+            child: bw.BarcodeWidget(
+              barcode: _barcode(),
+              data: card.value,
+              width: 300,
+              height: 220,
+              drawText: true,
+              errorBuilder: (_, __) => const Text(
+                'This barcode format cannot be displayed.',
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SelectableText(
+            card.value,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 25),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.wallet),
+              title: const Text('Rewards balance'),
+              subtitle: Text(
+                card.balance.isEmpty
+                    ? 'Not set'
+                    : card.balance,
+              ),
+              trailing: const Icon(Icons.edit),
+              onTap: onBalance,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Barcode compatibility can vary between stores. '
+            'Test your saved card before relying on it at checkout.',
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }
