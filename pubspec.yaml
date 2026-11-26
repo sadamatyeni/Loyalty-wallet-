@@ -1,0 +1,26 @@
+name: loyalty_wallet_sa
+description: South African loyalty card wallet
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mobile_scanner: ^6.0.2
+  barcode_widget: ^2.0.4
+  barcode: ^2.2.8
+  local_auth: ^2.3.0
+  flutter_secure_storage: ^9.2.2
+  crypto: ^3.0.3
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

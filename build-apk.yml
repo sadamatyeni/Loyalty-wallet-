@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create Android scaffold
+        run: flutter create --platforms=android --project-name loyalty_wallet_sa build_app
+      - name: Copy app source
+        run: |
+          cp pubspec.yaml build_app/
+          mkdir -p build_app/lib
+          cp lib/main.dart build_app/lib/main.dart
+      - name: Configure Android permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('build_app/android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          additions='''    <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+              <uses-permission android:name="android.permission.USE_FINGERPRINT"/>'''
+          s=s.replace('<application', additions+'\n    <application', 1)
+          p.write_text(s)
+          PY
+      - name: Get packages
+        working-directory: build_app
+        run: flutter pub get
+      - name: Build APK
+        working-directory: build_app
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Loyalty-Wallet-SA-APK
+          path: build_app/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14
