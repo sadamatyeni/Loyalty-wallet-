@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Loyalty Wallet APK
 
 on:
   workflow_dispatch:
@@ -10,35 +10,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Download source
         uses: actions/checkout@v4
 
-      - name: Install Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
       - name: Check files
         run: |
-          ls -la
           test -f pubspec.yaml
           test -f lib/main.dart
 
       - name: Create Android project
-        run: flutter create --platforms=android --org com.loyaltywallet --project-name loyalty_wallet_sa build_app
+        run: |
+          flutter create \
+            --platforms=android \
+            --org com.loyaltywallet \
+            --project-name loyalty_wallet_sa \
+            build_app
 
-      - name: Copy source code
+      - name: Copy app
         run: |
           cp pubspec.yaml build_app/
           cp -r lib build_app/
 
-      - name: Add permissions
+      - name: Android permissions
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -58,31 +62,30 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Install dependencies
-        working-directory: build_app
-        run: flutter pub get 2>&1 | tee pubget.log
-
-      - name: Build APK and save full log
+      - name: Build APK
         working-directory: build_app
         run: |
-          flutter build apk --debug --verbose 2>&1 | tee build.log
-          exit ${PIPESTATUS[0]}
+          set +e
 
-      - name: Upload diagnostic logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build-Diagnostic-Logs
-          path: |
-            build_app/build.log
-            build_app/pubget.log
-          if-no-files-found: warn
-          retention-days: 7
+          flutter pub get > build.log 2>&1
+          RESULT=$?
+
+          if [ $RESULT -eq 0 ]; then
+            flutter build apk --debug >> build.log 2>&1
+            RESULT=$?
+          fi
+
+          echo "========== BUILD OUTPUT =========="
+          tail -n 80 build.log
+
+          echo "========== ERRORS =========="
+          grep -n -E "Error:|error:|FAILURE:|Exception" build.log | tail -n 30 || true
+
+          exit $RESULT
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Loyalty-Wallet-SA-APK
+          name: Loyalty-Wallet-SA
           path: build_app/build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 14
