@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
-import 'package:flutter/material.dart';
+import 'package:barcode/barcode.dart' as barcode_lib;
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
