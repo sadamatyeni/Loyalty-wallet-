@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'package:barcode/barcode.dart' as barcode_lib;
